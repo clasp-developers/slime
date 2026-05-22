@@ -733,7 +733,7 @@
   (defstruct (mailbox (:conc-name mailbox.))
     thread
     (mutex (mp:make-lock :name "SLIMELCK"))
-    (cvar  (mp:make-condition-variable "slime-mailbox-cv"))
+    (cvar  (mp:make-condition-variable :name "slime-mailbox-cv"))
     (queue '() :type list))
 
   (defun mailbox (thread)
