@@ -289,11 +289,14 @@
 (defimplementation swank-compile-file (input-file output-file
                                        load-p external-format
                                        &key policy)
-  (declare (ignore policy))
   (multiple-value-bind (fasl warnings-p failure-p)
       (with-compilation-hooks ()
-        (compile-file input-file :output-file output-file
-                                 :external-format external-format))
+        ;; When the policy requests maximum debug (e.g. C-u C-c C-k),
+        ;; compile non-natively so the result is debug-friendly.
+        (let ((cmp:*compile-file-native*
+               (not (equal (cdr (assoc 'cl:debug policy)) 3))))
+          (compile-file input-file :output-file output-file
+                                   :external-format external-format)))
       (values fasl warnings-p
               (or failure-p
                   (when load-p
@@ -311,10 +314,14 @@
   (gethash tmp-file *tmpfile-map*))
 
 (defimplementation swank-compile-string (string &key buffer position filename line column policy)
-  (declare (ignore column policy)) ;; We may use column in the future
+  (declare (ignore column)) ;; We may use column in the future
   (with-compilation-hooks ()
     (let ((*buffer-name* buffer)        ; for compilation hooks
-          (*buffer-start-position* position))
+          (*buffer-start-position* position)
+          ;; When the policy requests maximum debug (e.g. C-u C-c C-c),
+          ;; compile non-natively so the result is debug-friendly.
+          (cmp:*compile-file-native*
+           (not (equal (cdr (assoc 'cl:debug policy)) 3))))
       (let ((tmp-file (mkstemp "clasp-swank-tmpfile-"))
             (fasl-file)
             (warnings-p)
