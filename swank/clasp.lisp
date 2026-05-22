@@ -43,6 +43,21 @@
 (defimplementation gray-package-name ()
   "GRAY")
 
+;; Cleavir's unwind-protect cleanup pushes CORE:*INTERRUPTS-ENABLED* = NIL
+;; on the binding stack for the duration of the cleanup body. The swank
+;; main loop runs inside the cleanup form of accept-connections'
+;; unwind-protect, so every eval-for-emacs that lands on TOP-LEVEL would
+;; otherwise run with async interrupts gated off (and C-c C-c silently
+;; dropped). Re-enable interrupts at the swank-worker / REPL boundary --
+;; these bindings are WITH-BINDINGS'd around REPL-LOOP and every spawned
+;; worker thread.
+(eval-when (:load-toplevel :execute)
+  (unless (boundp 'swank::*default-worker-thread-bindings*)
+    (setf (symbol-value 'swank::*default-worker-thread-bindings*) '()))
+  (pushnew '(core:*interrupts-enabled* . t)
+           swank::*default-worker-thread-bindings*
+           :key #'car))
+
 
 ;;;; TCP Server
 
@@ -662,9 +677,25 @@
     (mp:process-name thread))
 
   (defimplementation thread-status (thread)
-    (if (mp:process-active-p thread)
-        "RUNNING"
-        "STOPPED"))
+    (case (mp:process-phase thread)
+      (0 "NASCENT")
+      (1 "BOOTING")
+      (2 (let ((waiting (and (fboundp 'mp:process-waiting-on)
+                             (mp:process-waiting-on thread))))
+           (cond ((typep waiting 'mp:condition-variable)
+                  (format nil "Waiting on CV ~a"
+                          (mp:condition-variable-name waiting)))
+                 ((typep waiting 'mp:mutex)
+                  (let ((owner (mp:lock-owner waiting)))
+                    (format nil "Waiting on mutex ~a~@[ held by ~a~]"
+                            (mp:mutex-name waiting)
+                            (and owner (mp:process-name owner)))))
+                 ((typep waiting 'mp:shared-mutex)
+                  "Waiting on shared mutex")
+                 (t "RUNNING"))))
+      (3 "SUSPENDED")
+      (4 "EXITED")
+      (otherwise (mp:process-phase-string thread))))
 
   (defimplementation make-lock (&key name)
     (mp:make-recursive-mutex name))
