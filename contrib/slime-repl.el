@@ -542,6 +542,12 @@ Set point after the prompt.
 Return the position of the prompt beginning.
 
 If `slime-repl-suppress-prompt' is true, does nothing and returns nil."
+  ;; A fresh prompt means Lisp is back at top-level, not blocked in a read,
+  ;; so any leftover read-string context is stale — clear it so `,' works.
+  (when slime-read-string-threads
+    (setq slime-read-string-threads nil
+          slime-read-string-tags nil)
+    (slime-repl-update-read-mode))
   (goto-char slime-repl-input-start-mark)
   (unless slime-repl-suppress-prompt
     (slime-save-marker slime-output-start
@@ -1188,6 +1194,12 @@ The handler will use qeuery to ask the use if the error should be ingored."
 (make-variable-buffer-local
  (defvar slime-read-string-tags nil))
 
+(defun slime-repl-update-read-mode ()
+    "Enable `slime-repl-read-mode' iff a read is still pending.
+  Derives the mode from `slime-read-string-threads' rather than relying on
+  paired 1/-1 toggles, which desync under nested reads."
+    (slime-repl-read-mode (if slime-read-string-threads 1 -1)))
+
 (defun slime-repl-read-string (thread tag)
   (slime-switch-to-output-buffer)
   (push thread slime-read-string-threads)
@@ -1195,14 +1207,14 @@ The handler will use qeuery to ask the use if the error should be ingored."
   (goto-char (point-max))
   (slime-mark-output-end)
   (slime-mark-input-start)
-  (slime-repl-read-mode 1))
+  (slime-repl-update-read-mode))
 
 (defun slime-repl-return-string (string)
   (slime-dispatch-event `(:emacs-return-string
                           ,(pop slime-read-string-threads)
                           ,(pop slime-read-string-tags)
                           ,string))
-  (slime-repl-read-mode -1))
+  (slime-repl-update-read-mode))
 
 (defun slime-repl-read-break ()
   (interactive)
@@ -1212,7 +1224,7 @@ The handler will use qeuery to ask the use if the error should be ingored."
   (with-current-buffer (slime-output-buffer)
     (pop slime-read-string-threads)
     (pop slime-read-string-tags)
-    (slime-repl-read-mode -1)
+    (slime-repl-update-read-mode)
     (message "Read aborted")))
 
 
