@@ -5201,15 +5201,38 @@ argument is given, with CL:MACROEXPAND."
   (slime-quit-lisp-internal (slime-connection) 'slime-quit-sentinel kill))
 
 (defun slime-quit-lisp-internal (connection sentinel kill)
+  "Quit the Lisp for CONNECTION.
+Evaluate (SWANK:QUIT-LISP) asynchronously without waiting for the
+usual reply, and install SENTINEL to run when CONNECTION finally
+dies and clean up after it.  If KILL is non-nil, also kill the
+inferior Lisp process.  If the connection does not die on its own
+within a few seconds, forcibly close it so that the sentinel (and
+hence all buffer cleanup) still runs."
   (let ((slime-dispatching-connection connection))
     (slime-eval-async '(swank:quit-lisp))
-    (let* ((process (slime-inferior-process connection)))
-      (set-process-filter connection  nil)
-      (set-process-sentinel connection sentinel)
-      (when (and kill process)
-        (sleep-for 0.2)
-        (unless (memq (process-status process) '(exit signal))
-          (kill-process process))))))
+    (set-process-filter connection nil)
+    (let ((inferior (slime-inferior-process connection))
+          (attempt 0)
+          (dying-p nil))
+      (set-process-sentinel
+       connection
+       (lambda (process message)
+         (setq dying-p t)
+         (when (and kill
+                    inferior
+                    (not (memq (process-status inferior) '(exit signal))))
+           (kill-process inferior))
+         (funcall sentinel process message)))
+      ;; Give the connection a chance to die by itself in response to
+      ;; `swank:quit-lisp'.  If it doesn't, force it closed.  Deleting
+      ;; the process triggers the sentinel above, which runs the real
+      ;; cleanup, so buffers are torn down even against a hung Lisp.
+      (while (and (< (cl-incf attempt) 30)
+                  (not dying-p))
+        (sleep-for 0.1))
+      (unless dying-p
+        (message "Connection didn't close by itself; forcing it closed.")
+        (delete-process connection)))))
 
 (defun slime-quit-sentinel (process _message)
   (cl-assert (process-status process) 'closed)

@@ -1710,15 +1710,29 @@ If the current buffer is not a REPL, don't do anything."
   (or (slime-search-buffer-package)
       (slime-lisp-package)))
 
+(defun slime-repl-close-hook-function (process)
+  "Kill every REPL buffer associated with the closing PROCESS.
+Registered on `slime-net-process-close-hooks' so that quitting or
+losing a connection tears down its `*slime-repl-...*' buffers
+automatically, instead of leaving them behind."
+  (dolist (buffer (buffer-list))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (eq major-mode 'slime-repl-mode)
+                   (eq slime-buffer-connection process))
+          (kill-buffer buffer))))))
+
 (defun slime-repl-add-hooks ()
   (add-hook 'slime-event-hooks 'slime-repl-event-hook-function)
   (add-hook 'slime-connected-hook 'slime-repl-connected-hook-function)
+  (add-hook 'slime-net-process-close-hooks 'slime-repl-close-hook-function)
   (add-hook 'slime-cycle-connections-hook
             'slime-change-repl-to-default-connection))
 
 (defun slime-repl-remove-hooks ()
   (remove-hook 'slime-event-hooks 'slime-repl-event-hook-function)
   (remove-hook 'slime-connected-hook 'slime-repl-connected-hook-function)
+  (remove-hook 'slime-net-process-close-hooks 'slime-repl-close-hook-function)
   (remove-hook 'slime-cycle-connections-hook
                'slime-change-repl-to-default-connection))
 
